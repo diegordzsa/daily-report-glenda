@@ -52,7 +52,7 @@ async function run() {
     diagnosis = 'Diagnostico no disponible — error al generar analisis.';
   }
 
-  const reportText = formatReport({
+  const reportText = await formatReport({
     date: yesterday,
     metrics,
     diagnosis,
