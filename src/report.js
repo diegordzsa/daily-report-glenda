@@ -8,17 +8,20 @@ import {
 } from './config.js';
 
 async function run() {
-  let metaData, shopifyData;
+  const [metaResult, shopifyResult] = await Promise.allSettled([
+    fetchMetaAds(META_ACCESS_TOKEN),
+    fetchShopifyOrders(SHOPIFY_ACCESS_TOKEN),
+  ]);
 
-  try {
-    [metaData, shopifyData] = await Promise.all([
-      fetchMetaAds(META_ACCESS_TOKEN),
-      fetchShopifyOrders(SHOPIFY_ACCESS_TOKEN),
-    ]);
-  } catch (err) {
-    console.error('API fetch failed:', err.message);
+  const metaData = metaResult.status === 'fulfilled' ? metaResult.value : [];
+  const shopifyData = shopifyResult.status === 'fulfilled' ? shopifyResult.value : [];
+
+  if (metaResult.status === 'rejected') console.error('[Meta] Failed:', metaResult.reason.message);
+  if (shopifyResult.status === 'rejected') console.error('[Shopify] Failed:', shopifyResult.reason.message);
+
+  if (metaResult.status === 'rejected' && shopifyResult.status === 'rejected') {
     await sendToSlack(SLACK_WEBHOOK_URL,
-      `:warning: *${STORE_NAME} — Reporte Diario FALLIDO*\nNo se pudieron obtener datos.\nError: ${err.message}`
+      `:warning: *${STORE_NAME} — Reporte Diario FALLIDO*\nNo se pudieron obtener datos.\nMeta: ${metaResult.reason.message}\nShopify: ${shopifyResult.reason.message}`
     );
     process.exit(1);
   }
