@@ -1,0 +1,43 @@
+name: Daily Report
+
+on:
+  schedule:
+    # Hora UTC. Ejemplos:
+    #   '0 3 * * *'  = 3:00 UTC = 5:00 CEST (Madrid verano)
+    #   '0 12 * * *' = 12:00 UTC = 7:00 CDT (Mexico verano)
+    #   '0 13 * * *' = 13:00 UTC = 8:00 EST (Nueva York invierno)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run daily report
+        env:
+          # --- Requeridas (configurar en Settings > Secrets) ---
+          STORE_NAME: ${{ secrets.STORE_NAME }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+          SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN }}
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+          # --- Opcionales ---
+          STORE_CURRENCY: '$'
+          STORE_LOCALE: 'es-MX'
+          # STORE_INDUSTRY: ''
+          # ROAS_BENCHMARK: ''
+          # SUBSCRIPTION_TAGS: '[]'
+        run: node src/report.js
