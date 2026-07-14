@@ -2,7 +2,7 @@ import { STORE_NAME, STORE_CURRENCY, STORE_LOCALE, REPORT_TIME_LABEL, SUBSCRIPTI
 
 let cachedRate = null;
 
-async function fetchExchangeRate() {
+export async function fetchExchangeRate() {
   if (META_CURRENCY === STORE_CURRENCY) return 0;
   try {
     const from = META_CURRENCY === '€' ? 'EUR' : META_CURRENCY === '$' ? 'USD' : null;
@@ -72,7 +72,8 @@ export async function formatReport({ date, metrics, diagnosis }) {
     ``,
     `:loudspeaker: *PAID ADS (Meta)*`,
     `  Gasto: ${META_CURRENCY}${fmt(metrics.adSpend)}${conv(metrics.adSpend)}`,
-    `  ROAS: ${metrics.metaROAS.toFixed(2)}x | CPO: ${META_CURRENCY}${fmt(metrics.cpo)}${conv(metrics.cpo)}`,
+    `  ROAS: ${metrics.metaROAS.toFixed(2)}x | MER-ROAS: ${metrics.merROAS.toFixed(2)}x`,
+    `  CPO: ${META_CURRENCY}${fmt(metrics.cpo)}${conv(metrics.cpo)}`,
     `  Revenue atribuido: ${META_CURRENCY}${fmt(metrics.metaAttributedRevenue)}${conv(metrics.metaAttributedRevenue)}`,
     ``,
     `:mag: *FUNNEL*`,

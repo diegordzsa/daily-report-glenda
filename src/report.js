@@ -1,10 +1,10 @@
 import { fetchShopifyOrders, getYesterday } from './shopify.js';
 import { fetchMetaAds } from './meta.js';
 import { generateDiagnosis } from './claude.js';
-import { sendToSlack, formatReport } from './slack.js';
+import { sendToSlack, formatReport, fetchExchangeRate } from './slack.js';
 import {
   STORE_NAME, META_ACCESS_TOKEN, SHOPIFY_ACCESS_TOKEN,
-  SLACK_WEBHOOK_URL, SUBSCRIPTION_TAGS,
+  SLACK_WEBHOOK_URL, SUBSCRIPTION_TAGS, META_CURRENCY, STORE_CURRENCY,
 } from './config.js';
 
 async function run() {
@@ -41,8 +41,14 @@ async function run() {
 
   const metrics = calculateMetrics(metaData, shopifyData);
 
+  const rate = await fetchExchangeRate();
+  const adSpendStore = (rate > 0 && META_CURRENCY !== STORE_CURRENCY)
+    ? metrics.adSpend * rate
+    : metrics.adSpend;
+  metrics.merROAS = adSpendStore > 0 ? metrics.shopifyRevenue / adSpendStore : 0;
+
   const subDebug = metrics.subscriptionCounts.map(s => `${s.label}: ${s.count}`).join(', ');
-  console.log(`[Debug] Orders: ${metrics.shopifyOrders}, Net Sales: ${metrics.shopifyRevenue.toFixed(2)}${subDebug ? `, ${subDebug}` : ''}`);
+  console.log(`[Debug] Orders: ${metrics.shopifyOrders}, Net Sales: ${metrics.shopifyRevenue.toFixed(2)}, MER-ROAS: ${metrics.merROAS.toFixed(2)}x${subDebug ? `, ${subDebug}` : ''}`);
 
   let diagnosis;
   try {

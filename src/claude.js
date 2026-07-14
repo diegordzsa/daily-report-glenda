@@ -41,7 +41,8 @@ METRICAS PAID (Meta Ads):
 METRICAS SHOPIFY (fuente de verdad):
 - Revenue neto: ${STORE_CURRENCY}${metrics.shopifyRevenue.toFixed(2)}
 - Ordenes reales: ${metrics.shopifyOrders}
-- AOV: ${STORE_CURRENCY}${metrics.shopifyAOV.toFixed(2)}${subscriptionSection}
+- AOV: ${STORE_CURRENCY}${metrics.shopifyAOV.toFixed(2)}
+- MER-ROAS: ${metrics.merROAS.toFixed(2)}x (Revenue Shopify / Gasto Ads — el ROAS "real")${subscriptionSection}
 
 Identifica en 3-4 lineas:
 1. Cual es el punto mas debil del funnel hoy y por que
