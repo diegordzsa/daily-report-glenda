@@ -1,23 +1,9 @@
-import { STORE_NAME, STORE_CURRENCY, STORE_LOCALE, REPORT_TIME_LABEL, SUBSCRIPTION_TAGS, META_CURRENCY, META_TO_STORE_RATE_FALLBACK } from './config.js';
+import { STORE_NAME, STORE_LOCALE, REPORT_TIME_LABEL, SUBSCRIPTION_TAGS, REPORT_CURRENCY } from './config.js';
 
-let cachedRate = null;
-
-export async function fetchExchangeRate() {
-  if (META_CURRENCY === STORE_CURRENCY) return 0;
-  try {
-    const from = META_CURRENCY === '€' ? 'EUR' : META_CURRENCY === '$' ? 'USD' : null;
-    const to = STORE_CURRENCY === '$' ? 'MXN' : STORE_CURRENCY === '€' ? 'EUR' : null;
-    if (!from || !to || from === to) return META_TO_STORE_RATE_FALLBACK;
-    const res = await fetch(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
-    if (!res.ok) return META_TO_STORE_RATE_FALLBACK;
-    const data = await res.json();
-    const rate = data.rates?.[to];
-    console.log(`[FX] Live rate: 1 ${from} = ${rate} ${to}`);
-    return rate || META_TO_STORE_RATE_FALLBACK;
-  } catch {
-    console.warn('[FX] Failed to fetch live rate, using fallback');
-    return META_TO_STORE_RATE_FALLBACK;
-  }
+function buildSubscriptionLine(metrics) {
+  if (SUBSCRIPTION_TAGS.length === 0 || !metrics.subscriptionCounts) return null;
+  const parts = metrics.subscriptionCounts.map(s => `${s.label}: ${s.count}`);
+  return `  ${parts.join(' | ')}`;
 }
 
 export async function sendToSlack(webhookUrl, reportText) {
@@ -39,14 +25,7 @@ export async function sendToSlack(webhookUrl, reportText) {
   }
 }
 
-function buildSubscriptionLine(metrics) {
-  if (SUBSCRIPTION_TAGS.length === 0 || !metrics.subscriptionCounts) return null;
-  const parts = metrics.subscriptionCounts.map(s => `${s.label}: ${s.count}`);
-  return `  ${parts.join(' | ')}`;
-}
-
-export async function formatReport({ date, metrics, diagnosis }) {
-  cachedRate = await fetchExchangeRate();
+export function formatReport({ date, metrics, diagnosis }) {
   const d = new Date(date);
   const dateStr = d.toLocaleDateString(STORE_LOCALE, {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -60,8 +39,8 @@ export async function formatReport({ date, metrics, diagnosis }) {
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
     `:moneybag: *REVENUE*`,
-    `  Net Sales (Shopify): ${STORE_CURRENCY}${fmt(metrics.shopifyRevenue)}`,
-    `  Ordenes: ${metrics.shopifyOrders} | AOV: ${STORE_CURRENCY}${fmt(metrics.shopifyAOV)}`,
+    `  Net Sales (Shopify): ${REPORT_CURRENCY}${fmt(metrics.shopifyRevenue)}`,
+    `  Ordenes: ${metrics.shopifyOrders} | AOV: ${REPORT_CURRENCY}${fmt(metrics.shopifyAOV)}`,
   ];
 
   if (subscriptionLine) {
@@ -71,10 +50,10 @@ export async function formatReport({ date, metrics, diagnosis }) {
   lines.push(
     ``,
     `:loudspeaker: *PAID ADS (Meta)*`,
-    `  Gasto: ${META_CURRENCY}${fmt(metrics.adSpend)}${conv(metrics.adSpend)}`,
+    `  Gasto: ${REPORT_CURRENCY}${fmt(metrics.adSpend)}`,
     `  ROAS: ${metrics.metaROAS.toFixed(2)}x | MER-ROAS: ${metrics.merROAS.toFixed(2)}x`,
-    `  CPO: ${META_CURRENCY}${fmt(metrics.cpo)}${conv(metrics.cpo)}`,
-    `  Revenue atribuido: ${META_CURRENCY}${fmt(metrics.metaAttributedRevenue)}${conv(metrics.metaAttributedRevenue)}`,
+    `  CPO: ${REPORT_CURRENCY}${fmt(metrics.cpo)}`,
+    `  Revenue atribuido: ${REPORT_CURRENCY}${fmt(metrics.metaAttributedRevenue)}`,
     ``,
     `:mag: *FUNNEL*`,
     `  Impresiones: ${fmtInt(metrics.impressions)}`,
@@ -99,9 +78,4 @@ function fmt(n) {
 
 function fmtInt(n) {
   return n.toLocaleString(STORE_LOCALE);
-}
-
-function conv(n) {
-  if (!cachedRate || META_CURRENCY === STORE_CURRENCY) return '';
-  return ` (${STORE_CURRENCY}${fmt(n * cachedRate)})`;
 }

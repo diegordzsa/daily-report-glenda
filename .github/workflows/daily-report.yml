@@ -38,6 +38,7 @@ jobs:
           STORE_CURRENCY: '$'
           STORE_LOCALE: 'es-MX'
           META_CURRENCY: '€'
+          REPORT_CURRENCY: '€'
           # STORE_INDUSTRY: ''
           # ROAS_BENCHMARK: ''
           # SUBSCRIPTION_TAGS: '[]'

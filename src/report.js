@@ -1,10 +1,11 @@
 import { fetchShopifyOrders, getYesterday } from './shopify.js';
 import { fetchMetaAds } from './meta.js';
 import { generateDiagnosis } from './claude.js';
-import { sendToSlack, formatReport, fetchExchangeRate } from './slack.js';
+import { sendToSlack, formatReport } from './slack.js';
+import { fetchRate, resolveISO } from './exchange.js';
 import {
   STORE_NAME, META_ACCESS_TOKEN, SHOPIFY_ACCESS_TOKEN,
-  SLACK_WEBHOOK_URL, SUBSCRIPTION_TAGS, META_CURRENCY, STORE_CURRENCY,
+  SLACK_WEBHOOK_URL, SUBSCRIPTION_TAGS, STORE_CURRENCY, REPORT_CURRENCY,
 } from './config.js';
 
 async function run() {
@@ -41,14 +42,22 @@ async function run() {
 
   const metrics = calculateMetrics(metaData, shopifyData);
 
-  const rate = await fetchExchangeRate();
-  const adSpendStore = (rate > 0 && META_CURRENCY !== STORE_CURRENCY)
-    ? metrics.adSpend * rate
-    : metrics.adSpend;
-  metrics.merROAS = adSpendStore > 0 ? metrics.shopifyRevenue / adSpendStore : 0;
+  if (STORE_CURRENCY !== REPORT_CURRENCY) {
+    const fromISO = resolveISO(STORE_CURRENCY);
+    const toISO = resolveISO(REPORT_CURRENCY);
+    if (fromISO && toISO) {
+      const rate = await fetchRate(fromISO, toISO);
+      if (rate > 0) {
+        metrics.shopifyRevenue *= rate;
+        metrics.shopifyAOV *= rate;
+      }
+    }
+  }
+
+  metrics.merROAS = metrics.adSpend > 0 ? metrics.shopifyRevenue / metrics.adSpend : 0;
 
   const subDebug = metrics.subscriptionCounts.map(s => `${s.label}: ${s.count}`).join(', ');
-  console.log(`[Debug] Orders: ${metrics.shopifyOrders}, Net Sales: ${metrics.shopifyRevenue.toFixed(2)}, MER-ROAS: ${metrics.merROAS.toFixed(2)}x${subDebug ? `, ${subDebug}` : ''}`);
+  console.log(`[Debug] Orders: ${metrics.shopifyOrders}, Net Sales (EUR): ${metrics.shopifyRevenue.toFixed(2)}, MER-ROAS: ${metrics.merROAS.toFixed(2)}x${subDebug ? `, ${subDebug}` : ''}`);
 
   let diagnosis;
   try {
@@ -58,7 +67,7 @@ async function run() {
     diagnosis = 'Diagnostico no disponible — error al generar analisis.';
   }
 
-  const reportText = await formatReport({
+  const reportText = formatReport({
     date: yesterday,
     metrics,
     diagnosis,

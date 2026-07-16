@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { STORE_NAME, STORE_CURRENCY, STORE_INDUSTRY, ROAS_BENCHMARK, CLAUDE_MODEL, SUBSCRIPTION_TAGS } from './config.js';
+import { STORE_NAME, REPORT_CURRENCY, STORE_INDUSTRY, ROAS_BENCHMARK, CLAUDE_MODEL, SUBSCRIPTION_TAGS } from './config.js';
 
 function buildSubscriptionLines(metrics) {
   if (SUBSCRIPTION_TAGS.length === 0 || !metrics.subscriptionCounts) return '';
@@ -26,7 +26,7 @@ export async function generateDiagnosis(metrics) {
   const prompt = `Eres un analista de ecommerce DTC. Tienes los siguientes datos de ayer para ${STORE_NAME}:
 
 METRICAS PAID (Meta Ads):
-- Gasto: ${STORE_CURRENCY}${metrics.adSpend.toFixed(2)}
+- Gasto: ${REPORT_CURRENCY}${metrics.adSpend.toFixed(2)}
 - Impresiones: ${metrics.impressions}
 - Link Clicks: ${metrics.linkClicks}
 - Add to Carts: ${metrics.addToCarts}
@@ -39,9 +39,9 @@ METRICAS PAID (Meta Ads):
 - Purchase Rate: ${metrics.purchaseRate.toFixed(2)}%
 
 METRICAS SHOPIFY (fuente de verdad):
-- Revenue neto: ${STORE_CURRENCY}${metrics.shopifyRevenue.toFixed(2)}
+- Revenue neto: ${REPORT_CURRENCY}${metrics.shopifyRevenue.toFixed(2)}
 - Ordenes reales: ${metrics.shopifyOrders}
-- AOV: ${STORE_CURRENCY}${metrics.shopifyAOV.toFixed(2)}
+- AOV: ${REPORT_CURRENCY}${metrics.shopifyAOV.toFixed(2)}
 - MER-ROAS: ${metrics.merROAS.toFixed(2)}x (Revenue Shopify / Gasto Ads — el ROAS "real")${subscriptionSection}
 
 Identifica en 3-4 lineas:

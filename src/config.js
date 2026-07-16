@@ -40,5 +40,6 @@ export const META_API_VERSION = optional('META_API_VERSION', 'v21.0');
 export const SHOPIFY_API_VERSION = optional('SHOPIFY_API_VERSION', '2024-10');
 export const CLAUDE_MODEL = optional('CLAUDE_MODEL', 'claude-sonnet-4-6');
 export const META_CURRENCY = optional('META_CURRENCY', STORE_CURRENCY);
+export const REPORT_CURRENCY = optional('REPORT_CURRENCY', STORE_CURRENCY);
 export const META_TO_STORE_RATE_FALLBACK = Number(optional('META_TO_STORE_RATE', '0'));
 export const SUBSCRIPTION_TAGS = parseSubscriptionTags(optional('SUBSCRIPTION_TAGS'));
