@@ -9,8 +9,10 @@ import {
 } from './config.js';
 
 async function run() {
+  const yesterday = getYesterday();
+
   const [metaResult, shopifyResult] = await Promise.allSettled([
-    fetchMetaAds(META_ACCESS_TOKEN),
+    fetchMetaAds(META_ACCESS_TOKEN, yesterday),
     fetchShopifyOrders(SHOPIFY_ACCESS_TOKEN),
   ]);
 
@@ -26,8 +28,6 @@ async function run() {
     );
     process.exit(1);
   }
-
-  const yesterday = getYesterday();
 
   console.log(`[Debug] Yesterday: ${yesterday}`);
   console.log(`[Debug] Meta rows: ${metaData.length}, Shopify rows: ${shopifyData.length}`);

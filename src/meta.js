@@ -27,11 +27,11 @@ function extractActions(actionsArray, map) {
   return result;
 }
 
-export async function fetchMetaAds(accessToken) {
+export async function fetchMetaAds(accessToken, reportDate) {
   const fields = 'spend,impressions,clicks,actions,action_values,cpc,cpm,ctr,frequency';
   const params = new URLSearchParams({
     access_token: accessToken,
-    date_preset: 'yesterday',
+    time_range: JSON.stringify({ since: reportDate, until: reportDate }),
     level: 'account',
     fields,
   });
