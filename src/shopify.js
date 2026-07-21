@@ -12,11 +12,12 @@ export async function fetchShopifyOrders(accessToken) {
   const twoDaysAgo = new Date(yesterday);
   twoDaysAgo.setDate(twoDaysAgo.getDate() - 1);
   const minDate = twoDaysAgo.toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
 
   const params = new URLSearchParams({
     status: 'any',
-    created_at_min: `${minDate}T00:00:00Z`,
-    created_at_max: `${yesterday}T23:59:59Z`,
+    created_at_min: `${minDate}T00:00:00`,
+    created_at_max: `${today}T23:59:59`,
     limit: '250',
     fields: 'id,created_at,subtotal_price,total_discounts,tags,line_items',
   });
