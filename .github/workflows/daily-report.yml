@@ -8,6 +8,10 @@ on:
     #   '0 13 * * *' = 13:00 UTC = 8:00 EST (Nueva York invierno)
     - cron: '0 3 * * *'
   workflow_dispatch:
+    inputs:
+      report_date:
+        description: 'Date to report on (YYYY-MM-DD). Leave empty for yesterday.'
+        required: false
 
 jobs:
   report:
@@ -42,4 +46,5 @@ jobs:
           # STORE_INDUSTRY: ''
           # ROAS_BENCHMARK: ''
           # SUBSCRIPTION_TAGS: '[]'
+          REPORT_DATE: ${{ inputs.report_date }}
         run: node src/report.js

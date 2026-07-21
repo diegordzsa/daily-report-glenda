@@ -1,6 +1,7 @@
 import { SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION } from './config.js';
 
 export function getYesterday() {
+  if (process.env.REPORT_DATE) return process.env.REPORT_DATE;
   const d = new Date();
   d.setDate(d.getDate() - 1);
   return d.toISOString().slice(0, 10);
