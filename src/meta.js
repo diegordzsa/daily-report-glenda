@@ -54,6 +54,9 @@ export async function fetchMetaAds(accessToken, reportDate) {
 
   const data = json.data || [];
   console.log(`[Meta] Got ${data.length} rows`);
+  if (data.length > 0) {
+    console.log(`[Meta] Account-level spend for ${reportDate}: ${data[0].spend}`);
+  }
 
   if (data.length === 0) return [];
 

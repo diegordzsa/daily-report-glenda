@@ -50,7 +50,7 @@ export function formatReport({ date, metrics, diagnosis }) {
   lines.push(
     ``,
     `:loudspeaker: *PAID ADS (Meta)*`,
-    `  Gasto: ${REPORT_CURRENCY}${fmt(metrics.adSpend)}`,
+    `  Gasto: ${REPORT_CURRENCY}${fmt(metrics.adSpend)}${metrics.adSpendUSD != null ? ` ($${fmt(metrics.adSpendUSD)})` : ''}`,
     `  ROAS: ${metrics.metaROAS.toFixed(2)}x | MER-ROAS: ${metrics.merROAS.toFixed(2)}x`,
     `  CPO: ${REPORT_CURRENCY}${fmt(metrics.cpo)}`,
     `  Revenue atribuido: ${REPORT_CURRENCY}${fmt(metrics.metaAttributedRevenue)}`,

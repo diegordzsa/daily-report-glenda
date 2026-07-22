@@ -54,6 +54,14 @@ async function run() {
     }
   }
 
+  const spendISO = resolveISO(REPORT_CURRENCY);
+  if (spendISO && spendISO !== 'USD') {
+    const usdRate = await fetchRate(spendISO, 'USD');
+    if (usdRate > 0) {
+      metrics.adSpendUSD = metrics.adSpend * usdRate;
+    }
+  }
+
   metrics.merROAS = metrics.adSpend > 0 ? metrics.shopifyRevenue / metrics.adSpend : 0;
 
   const subDebug = metrics.subscriptionCounts.map(s => `${s.label}: ${s.count}`).join(', ');
