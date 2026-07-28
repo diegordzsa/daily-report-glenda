@@ -143,7 +143,48 @@ El cron de GitHub Actions usa UTC. Ajusta la expresion segun tu zona horaria:
 
 Edita la linea `cron:` en `.github/workflows/daily-report.yml`.
 
-> **Nota:** GitHub Actions puede tener un retraso de hasta 15 minutos en los cron jobs.
+### Limite: no bajar de 06:00 UTC
+
+La tienda Shopify esta en Mexico (UTC-6, sin horario de verano desde 2022). El
+reporte cubre "ayer" segun el calendario de la tienda, y ese dia **recien cierra
+a las 06:00 UTC**. Si el job corre antes, se pierden las ventas de la noche
+mexicana y los numeros salen incompletos (es el bug que se arreglo en 362bb40).
+
+Por eso el cron esta en `15 6 * * *` y no debe adelantarse mas.
+
+### El retraso real de GitHub Actions
+
+GitHub encola los workflows programados; en repos con poca actividad el retraso
+es **de 2 a 3.5 horas**, no de 15 minutos. Medido sobre 16 ejecuciones (jul 2026):
+
+| Cron | Arranque real (UTC) | Retraso |
+|---|---|---|
+| `0 3 * * *` (13-22 jul) | 05:17 – 06:08 | +2h17 a +3h08 |
+| `0 7 * * *` (23-28 jul) | 08:54 – 10:32 | +1h54 a +3h32 |
+
+El retraso no depende de la hora elegida: cambiar el cron mueve la ventana, no la
+estrecha. Con `15 6 * * *` la entrega efectiva ronda las **10:00–11:45 Madrid**.
+
+### Si hace falta una hora exacta
+
+`schedule` es best-effort y no da puntualidad. Para clavar una hora concreta:
+
+1. **Paso de espera** (gratis, el repo es publico). Cron temprano + dormir hasta
+   la hora objetivo antes de mandar a Slack:
+
+   ```yaml
+   - name: Wait until 09:00 Madrid
+     run: |
+       target=$(TZ=Europe/Madrid date -d 'today 09:00' +%s)
+       now=$(date +%s)
+       [ $now -lt $target ] && sleep $((target - now)) || true
+   ```
+
+   Con objetivo 09:00 Madrid (07:00 UTC en verano) los datos son identicos a los
+   de hoy, porque 07:00 UTC ya pasa el cierre mexicano de las 06:00 UTC.
+
+2. **Trigger externo** (cron-job.org, Cloudflare Worker) que llame a
+   `workflow_dispatch` via API. Dispara en segundos, sin cola.
 
 ---
 
