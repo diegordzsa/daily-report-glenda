@@ -4,19 +4,42 @@ Este template genera un reporte diario automatico que combina datos de **Meta Ad
 
 ---
 
+## Configuracion actual de GLENDA
+
+| Dato | Valor | Como se supo |
+|---|---|---|
+| Cuenta Meta | `SKIN+ MX` | `GET /act_<id>?fields=name` |
+| TZ cuenta Meta | `America/Mexico_City` (UTC-6, sin DST) | `timezone_name`, `timezone_offset_hours_utc: -6` |
+| Moneda Meta | EUR | `currency` + `account_currency` en insights |
+| Tienda Shopify | `GLENDA®` | `GET /admin/api/2024-10/shop.json` |
+| TZ Shopify | `America/Mexico_City` | `iana_timezone` |
+| Moneda Shopify | MXN | `currency`, `money_format: "$ {{amount}}"` |
+| Cierre del dia | **06:00 UTC** | 00:00 America/Mexico_City |
+| `MIN_HOURS_AFTER_CLOSE` | 3 | Ver "Por que las 11:05" |
+| Entrega | **11:05 Europe/Madrid** | Cron externo, no GitHub |
+| Lector del reporte | Madrid | `STORE_LOCALE: es-ES` |
+
+Todo medido el 2026-07-29 contra las APIs reales. Si cambia la timezone de la
+cuenta en el Business Manager, el codigo lo detecta solo: lee `timezone_name` en
+cada ejecucion y `META_ACCOUNT_TIMEZONE` es solo el fallback.
+
+---
+
 ## Checklist Rapido
 
 1. Crear un nuevo repo en GitHub usando este template
-2. Configurar los 8 secretos requeridos en GitHub (Settings > Secrets and variables > Actions)
-3. Ajustar la hora del cron en `.github/workflows/daily-report.yml` segun tu timezone
-4. (Opcional) Descomentar y configurar variables opcionales en el workflow
-5. Probar ejecutando el workflow manualmente (Actions > Daily Report > Run workflow)
+2. Configurar los 7 secretos requeridos en GitHub (Settings > Secrets and variables > Actions)
+3. **Medir** la timezone y la moneda de la cuenta de Meta y de Shopify, y poner
+   los valores en el bloque `env:` del workflow. No copiarlos de otra tienda.
+4. Calcular la hora de entrega (ver "Por que no hay cron de GitHub")
+5. Crear el cronjob externo en cron-job.org
+6. Probar ejecutando el workflow manualmente (Actions > Daily Report > Run workflow)
 
 ---
 
 ## Secretos Requeridos
 
-Configura estos 8 secretos en tu repositorio de GitHub:
+Configura estos 7 secretos en tu repositorio de GitHub:
 **Settings > Secrets and variables > Actions > New repository secret**
 
 ### `STORE_NAME`
@@ -55,18 +78,19 @@ El dominio `.myshopify.com` de tu tienda.
 3. Copia solo la parte `tu-tienda.myshopify.com`
 - Ejemplo: `mi-tienda.myshopify.com`
 
-### `SHOPIFY_CLIENT_ID` y `SHOPIFY_CLIENT_SECRET`
-Credenciales de una Custom App de Shopify con acceso a la Admin API.
+### `SHOPIFY_ACCESS_TOKEN`
+Token de Admin API de una Custom App de Shopify.
 
-**Como obtenerlos:**
-1. Ve a [Shopify Partners](https://partners.shopify.com) o al **Dev Dashboard** de tu tienda
-2. Crea una nueva app (Custom App)
-3. En **API credentials**, configura los scopes de Admin API:
-   - `read_orders` (requerido)
-4. Instala la app en tu tienda
-5. Copia el **Client ID** y **Client Secret** de la seccion de credenciales
+**Como obtenerlo:**
+1. En el admin de Shopify: **Settings > Apps and sales channels > Develop apps**
+2. Crea una app (o abre la existente)
+3. En **Configuration > Admin API integration**, activa el scope `read_orders`
+4. Instala la app en la tienda
+5. En **API credentials**, copia el **Admin API access token**
+- Formato: `shpat_...`
 
-> **Importante:** Esta app usa `client_credentials` grant (no requiere un token estatico `shpat_`). Solo necesitas el Client ID y Client Secret.
+> Los scripts `get-shopify-token.js` y `exchange-token.js` del repo son ayudas
+> puntuales para obtener ese token; el reporte no los usa en ejecucion.
 
 ### `ANTHROPIC_API_KEY`
 API key de Anthropic para usar Claude.
@@ -97,13 +121,37 @@ URL de Incoming Webhook de Slack para enviar el reporte.
 
 Estas variables tienen valores por defecto. Para cambiarlas, descomenta las lineas correspondientes en `.github/workflows/daily-report.yml`.
 
+### Obligatorias por tienda (medir, no copiar)
+
+Estas tres **no tienen default** y el reporte no arranca sin ellas. Son codigos
+ISO, no simbolos: `$` es ambiguo (MXN o USD) y una conversion mal resuelta da
+cifras falsas sin que nada falle.
+
+| Variable | GLENDA | Como medirlo |
+|---|---|---|
+| `STORE_CURRENCY_ISO` | `MXN` | `shop.json` > `currency` |
+| `META_CURRENCY_ISO` | `EUR` | `GET /act_<id>?fields=currency` |
+| `REPORT_CURRENCY_ISO` | `EUR` | La moneda en la que quieres leer el reporte |
+
+El **simbolo se deriva** de `REPORT_CURRENCY_ISO` + `STORE_LOCALE` (EUR + es-ES
+da `€`). `REPORT_CURRENCY` existe solo como override manual.
+
+Si `META_CURRENCY_ISO` y `REPORT_CURRENCY_ISO` no coinciden, el reporte **no se
+publica**: el gasto de Meta se usa sin convertir. Y el codigo compara lo
+configurado contra el `account_currency` que devuelve la propia API de insights,
+asi que si la cuenta cambia de moneda se entera.
+
+### Resto de opcionales
+
 | Variable | Default | Cuando cambiar |
 |---|---|---|
-| `STORE_CURRENCY` | `€` | Si tu tienda usa otra moneda (`$`, `£`, `MX$`) |
-| `STORE_LOCALE` | `es-ES` | Si necesitas otro formato de numeros (`en-US`, `es-MX`, `pt-BR`) |
+| `META_ACCOUNT_TIMEZONE` | `America/Mexico_City` | Fallback si falla la lectura de `timezone_name`. Debe ser la TZ de la cuenta de **Meta** |
+| `MIN_HOURS_AFTER_CLOSE` | `3` | Solo con datos del probe de frescura. Nunca por corazonada |
+| `STORE_LOCALE` | `es-ES` | Locale del **lector**, no de la tienda (`en-US`, `es-MX`, `pt-BR`) |
+| `REPORT_TIME_LABEL` | `11:05 (Europe/Madrid)` | Si cambias la hora en cron-job.org, actualiza esto para que no mienta |
+| `FX_FALLBACK_STORE_PER_REPORT` | `0` | Unidades de `STORE_CURRENCY_ISO` por 1 `REPORT_CURRENCY_ISO` (MXN por EUR). Solo se usa si la API de FX cae |
 | `STORE_INDUSTRY` | _(vacio)_ | Para benchmarks especificos en el diagnostico de Claude |
 | `ROAS_BENCHMARK` | _(vacio)_ | Para que Claude compare contra un benchmark de tu industria |
-| `REPORT_TIME_LABEL` | `5:00 AM` | Si cambias la hora del cron, actualiza esto para que coincida |
 | `META_API_VERSION` | `v21.0` | Si Meta depreca esta version |
 | `SHOPIFY_API_VERSION` | `2024-10` | Si Shopify depreca esta version |
 | `CLAUDE_MODEL` | `claude-sonnet-4-6` | Para usar otro modelo de Claude |
@@ -127,64 +175,147 @@ Si no defines `SUBSCRIPTION_TAGS` o lo dejas vacio, las metricas de suscripcion 
 
 ---
 
-## Timezone y Cron
+## Por que no hay cron de GitHub
 
-El cron de GitHub Actions usa UTC. Ajusta la expresion segun tu zona horaria:
+El workflow **no tiene bloque `schedule:`**. Es deliberado.
 
-| Hora local deseada | Timezone | Cron UTC |
-|---|---|---|
-| 5:00 AM | Madrid (CEST, verano) | `0 3 * * *` |
-| 5:00 AM | Madrid (CET, invierno) | `0 4 * * *` |
-| 7:00 AM | Mexico City (CDT, verano) | `0 12 * * *` |
-| 7:00 AM | Mexico City (CST, invierno) | `0 13 * * *` |
-| 8:00 AM | Nueva York (EDT, verano) | `0 12 * * *` |
-| 8:00 AM | Nueva York (EST, invierno) | `0 13 * * *` |
-| 9:00 AM | Buenos Aires (ART) | `0 12 * * *` |
+GitHub encola los workflows programados y los arranca tarde, sin patron. Medido
+sobre **21 ejecuciones reales de este repo** (9–29 jul 2026), comparando el cron
+vigente en cada fecha contra el arranque real:
 
-Edita la linea `cron:` en `.github/workflows/daily-report.yml`.
+| Cron | Fechas | Arranque real (UTC) | Retraso |
+|---|---|---|---|
+| `0 3 * * *` | 9–22 jul (14 runs) | 05:17 – 06:36 | +2h17 a +3h36 |
+| `0 7 * * *` | 23–28 jul (6 runs) | 08:54 – 10:32 | +1h54 a +3h32 |
+| `15 6 * * *` | 29 jul (1 run) | 09:10 | +2h55 |
 
-### Limite: no bajar de 06:00 UTC
+**Global: +1h 55min a +3h 36min, media +2h 41min.** El retraso no depende de la
+hora elegida: cambiar el cron mueve la ventana, no la estrecha. Con esa
+dispersion no se puede prometer una hora de entrega ni garantizar que el dia haya
+cerrado.
 
-La tienda Shopify esta en Mexico (UTC-6, sin horario de verano desde 2022). El
-reporte cubre "ayer" segun el calendario de la tienda, y ese dia **recien cierra
-a las 06:00 UTC**. Si el job corre antes, se pierden las ventas de la noche
-mexicana y los numeros salen incompletos (es el bug que se arreglo en 362bb40).
+El disparo lo hace **cron-job.org** contra la API de dispatches. Ver mas abajo.
 
-Por eso el cron esta en `15 6 * * *` y no debe adelantarse mas.
+---
 
-### El retraso real de GitHub Actions
+## Por que las 11:05 Europe/Madrid
 
-GitHub encola los workflows programados; en repos con poca actividad el retraso
-es **de 2 a 3.5 horas**, no de 15 minutos. Medido sobre 16 ejecuciones (jul 2026):
+### 1. Cuando cierra el dia
 
-| Cron | Arranque real (UTC) | Retraso |
-|---|---|---|
-| `0 3 * * *` (13-22 jul) | 05:17 – 06:08 | +2h17 a +3h08 |
-| `0 7 * * *` (23-28 jul) | 08:54 – 10:32 | +1h54 a +3h32 |
+El dia lo cierra la **timezone de la cuenta publicitaria**, no la del lector ni
+UTC. Medido: `America/Mexico_City`, UTC-6, sin DST desde 2022.
 
-El retraso no depende de la hora elegida: cambiar el cron mueve la ventana, no la
-estrecha. Con `15 6 * * *` la entrega efectiva ronda las **10:00–11:45 Madrid**.
+**00:00 America/Mexico_City = 06:00 UTC.** Ese es el instante a partir del cual
+"ayer" existe como dia completo.
 
-### Si hace falta una hora exacta
+### 2. Cuanto hay que esperar despues del cierre
 
-`schedule` es best-effort y no da puntualidad. Para clavar una hora concreta:
+Meta sigue agregando gasto durante horas tras el cierre. Un gasto subestimado
+infla ROAS y MER, asi que **antes no publicar que publicar mal**.
 
-1. **Paso de espera** (gratis, el repo es publico). Cron temprano + dormir hasta
-   la hora objetivo antes de mandar a Slack:
+Medido cruzando el gasto que reporto cada ejecucion contra el consolidado
+posterior (7 ejecuciones, 22–28 jul 2026):
 
-   ```yaml
-   - name: Wait until 09:00 Madrid
-     run: |
-       target=$(TZ=Europe/Madrid date -d 'today 09:00' +%s)
-       now=$(date +%s)
-       [ $now -lt $target ] && sleep $((target - now)) || true
-   ```
+| Fecha | Reportado | h post-cierre | Consolidado | Error |
+|---|---|---|---|---|
+| 2026-07-24 | 391.61 | 2.92 h | 393.48 | −0.48 % |
+| 2026-07-25 | 280.28 | 3.12 h | 281.42 | −0.41 % |
+| 2026-07-28 | 285.21 | 3.18 h | 287.45 | −0.78 % |
+| 2026-07-23 | 306.27 | 3.25 h | 307.88 | −0.52 % |
+| 2026-07-22 | 373.67 | 3.31 h | 376.21 | −0.68 % |
+| 2026-07-27 | 126.03 | 3.51 h | 127.28 | −0.98 % |
+| 2026-07-26 | 288.92 | 4.54 h | 291.14 | −0.76 % |
 
-   Con objetivo 09:00 Madrid (07:00 UTC en verano) los datos son identicos a los
-   de hoy, porque 07:00 UTC ya pasa el cierre mexicano de las 06:00 UTC.
+Entre 2.9 h y 4.5 h el error es **plano y siempre por debajo**, en el rango
+−0.4 % a −1.0 %. **Por debajo de 2.9 h no hay medicion.** De ahi
+`MIN_HOURS_AFTER_CLOSE = 3`: no bajarlo sin datos del probe de frescura.
 
-2. **Trigger externo** (cron-job.org, Cloudflare Worker) que llame a
-   `workflow_dispatch` via API. Dispara en segundos, sin cola.
+Cierre 06:00 UTC + 3 h = **09:00 UTC como hora mas temprana defendible**.
+
+### 3. Traducido a la hora del lector
+
+El lector esta en Madrid. El cron externo se configura **en Europe/Madrid, no en
+UTC**, porque Mexico no cambia la hora y Madrid si:
+
+| | Madrid | UTC | h post-cierre |
+|---|---|---|---|
+| Verano (CEST, UTC+2) | 11:05 | 09:05 | 3.08 h |
+| Invierno (CET, UTC+1) | 11:05 | 10:05 | 4.08 h |
+
+Fijandolo en hora de Madrid, la hora local se mantiene todo el año y **en
+invierno el dato llega incluso mas consolidado**. Simulados los 365 dias de 2026,
+el minimo anual de horas post-cierre es 3.08 h: nunca baja del umbral.
+
+Los 5 minutos sobre las 11:00 son margen: a las 11:00 clavadas el peor caso daba
+exactamente 3.00 h, justo en el borde del guard.
+
+### Lo que no es posible
+
+**Un reporte a las 8:00–9:00 Madrid no puede ser fiable.** A las 8:00 de verano
+son las 06:00 UTC, el instante exacto del cierre: cero horas de consolidacion. A
+las 9:00 es 1 h post-cierre, fuera de todo lo medido. El guard bloquearia ambas.
+
+Para adelantar la hora hace falta medir primero, con el probe de frescura
+(`workflow_dispatch` que solo loguea): dispararlo 1 h y 2 h antes durante ~5 dias
+y comparar contra el consolidado. Si el error se mantiene en −0.4 % a −1.0 %,
+entonces se baja la hora y `MIN_HOURS_AFTER_CLOSE`. Si se dispara, se queda.
+
+---
+
+## El guard de frescura
+
+`src/report.js` comprueba, **antes de pedir ningun dato**, cuantas horas lleva
+cerrado el dia en la timezone de la cuenta. Si no llega a
+`MIN_HOURS_AFTER_CLOSE`, avisa a Slack y sale con `process.exit(1)` para que se
+vea en rojo en Actions.
+
+```
+[Freshness] 2026-07-28 cerro hace 3.12 h en America/Mexico_City (minimo requerido: 3 h)
+```
+
+La timezone se lee de la API de Meta en cada ejecucion; `META_ACCOUNT_TIMEZONE`
+es solo el fallback si esa llamada falla.
+
+---
+
+## Cron externo (cron-job.org)
+
+Un cronjob por tienda. Lo unico que cambia entre tiendas es la URL y la hora.
+
+- **URL:** `https://api.github.com/repos/diegordzsa/daily-report-glenda/actions/workflows/daily-report.yml/dispatches`
+- **Method:** POST
+- **Body:** `{"ref":"main"}`
+- **Headers:**
+  - `Accept: application/vnd.github+json`
+  - `Authorization: Bearer <PAT>`
+  - `X-GitHub-Api-Version: 2022-11-28`
+  - `Content-Type: application/json`
+- **Respuesta correcta: 204 No Content.**
+  401 = token mal copiado · 403 = falta permiso *Actions: Read and write* ·
+  404 = URL con errata
+- **Schedule:** modo *Custom*, zona horaria **Europe/Madrid**, `5 11 * * *`.
+  Las listas son multiseleccion (`Ctrl`+clic) o se escribe la expresion en
+  *Crontab expression*. **MINUTES tiene que quedar con un solo valor**: si queda
+  en *every*, dispara 120 veces al dia.
+- Activar **aviso por email al fallar**. Sin cron de GitHub no hay red de
+  seguridad.
+
+Reutiliza el PAT que ya existe en cron-job.org; tiene acceso a todos los repos.
+No crees uno nuevo.
+
+### Organizacion con varias tiendas
+
+Usa **MANAGE FOLDERS** y agrupa todos los reportes. Nombra igual siempre:
+`<Tienda> reporte diario`, `<Tienda> probe frescura`.
+
+| Tienda | Repo | TZ cuenta Meta | Cierre UTC | Entrega | Moneda Shopify / Meta |
+|---|---|---|---|---|---|
+| Zendi | `daily-report-zendi` | America/Mexico_City | 06:00 | 11:00 Madrid | MXN / EUR |
+| GLENDA | `daily-report-glenda` | America/Mexico_City | 06:00 | 11:05 Madrid | MXN / EUR |
+
+**Prueba con el probe, no con el reporte.** Ambos usan el mismo token y
+cabeceras, pero el probe no escribe en Slack: valida la autenticacion sin mandar
+un reporte duplicado.
 
 ---
 
@@ -204,7 +335,10 @@ Si falla, haz clic en el job para ver los logs y el mensaje de error.
 
 | Error | Causa | Solucion |
 |---|---|---|
-| `Missing required env var: X` | Falta un secreto en GitHub | Agrega el secreto en Settings > Secrets |
+| `Missing required env var: X` | Falta un secreto en GitHub, o falta una de las `*_CURRENCY_ISO` en el bloque `env:` | Agrega el secreto en Settings > Secrets, o la variable en el workflow |
+| Slack dice "Reporte Diario NO publicado" y el job sale en rojo | El guard de frescura: el dia no lleva `MIN_HOURS_AFTER_CLOSE` horas cerrado | Correcto, no es un fallo. Revisa que cron-job.org dispare a la hora acordada |
+| Slack dice "Problema de moneda" | La moneda que reporta Meta no coincide con `META_CURRENCY_ISO`, o no hubo tipo de cambio | Verifica la moneda de la cuenta; configura `FX_FALLBACK_STORE_PER_REPORT` |
+| El cronjob externo devuelve 401/403/404 | Token mal copiado / falta *Actions: Read and write* / URL con errata | Ver la seccion de cron-job.org |
 | `Meta API error: 190` | Token de Meta expirado o invalido | Genera un nuevo token (usa System User para que no expire) |
 | `Meta API error: 100` | Ad Account ID incorrecto | Verifica el ID en Business Settings > Ad Accounts |
 | `Shopify token exchange failed: 401` | Client ID/Secret incorrectos | Verifica las credenciales en el Dev Dashboard de Shopify |

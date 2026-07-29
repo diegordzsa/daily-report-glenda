@@ -49,13 +49,24 @@ Identifica en 3-4 lineas:
 ${buildRoasInstruction()}
 3. Una accion concreta que se deberia tomar hoy
 
-Responde en espanol, directo, sin introducciones.`;
+Responde en espanol, directo, sin introducciones.
+No uses Markdown: Slack no renderiza ** ni ##. Para enfatizar usa *un solo
+asterisco*. Maximo 6 lineas, y termina siempre la ultima frase.`;
 
   const message = await client.messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 300,
+    max_tokens: 600,
     messages: [{ role: 'user', content: prompt }],
   });
 
-  return message.content[0].text;
+  return toSlackMrkdwn(message.content[0].text);
+}
+
+// Slack usa *negrita*, no **negrita**. Si el modelo se va a Markdown de todas
+// formas, el lector ve los asteriscos en crudo.
+function toSlackMrkdwn(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/gs, '*$1*')
+    .replace(/^#{1,6}\s+/gm, '')
+    .trim();
 }
