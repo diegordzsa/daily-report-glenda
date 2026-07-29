@@ -1,17 +1,16 @@
 name: Daily Report
 
+# NO hay bloque `schedule:` a proposito.
+#
+# El scheduler de GitHub encola los cron y los arranca tarde, sin patron. Medido
+# sobre 21 ejecuciones reales de este repo (9-29 jul 2026, contra el cron vigente
+# en cada fecha): entre +1 h 55 min y +3 h 36 min, media +2 h 41 min. Con esa
+# dispersion no se puede prometer una hora de entrega ni garantizar que el dia
+# haya cerrado.
+#
+# El disparo lo hace un cronjob externo (cron-job.org) contra la API de
+# dispatches, configurado en Europe/Madrid. Ver SETUP.md.
 on:
-  schedule:
-    # Hora UTC. NO bajar de 06:00 UTC: la tienda Shopify esta en Mexico (UTC-6),
-    # asi que el dia que se reporta (ayer) recien cierra a las 06:00 UTC. Correr
-    # antes devuelve datos incompletos (se pierden las ventas de la noche).
-    # 06:15 UTC = 00:15 Mexico (dia cerrado, +15 min de margen)
-    #           =  8:15 Madrid en verano / 7:15 en invierno.
-    #
-    # OJO: GitHub encola los workflows programados y los arranca con 2-3.5 h de
-    # retraso real, asi que la entrega efectiva ronda las 10:00-11:45 Madrid.
-    # Ver notas en SETUP.md para conseguir una hora exacta.
-    - cron: '15 6 * * *'
   workflow_dispatch:
     inputs:
       report_date:
@@ -43,13 +42,37 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-          # --- Opcionales ---
-          STORE_CURRENCY: '$'
-          STORE_LOCALE: 'es-MX'
-          META_CURRENCY: '€'
-          REPORT_CURRENCY: '€'
+          # --- Frescura de datos ---
+          # Medido 2026-07-29 en GET /act_<id>?fields=timezone_name:
+          #   cuenta "SKIN+ MX" -> America/Mexico_City, offset -6, sin DST.
+          # Solo es el fallback: el codigo lee la timezone de la API en cada run.
+          META_ACCOUNT_TIMEZONE: 'America/Mexico_City'
+          # El dia cierra a las 06:00 UTC. 3 h => no publicar antes de 09:00 UTC.
+          # Medido: entre 2.92 h y 4.54 h post-cierre el error fue -0.41 % a
+          # -0.98 %, siempre subestimando. Por debajo de 2.9 h no hay datos.
+          MIN_HOURS_AFTER_CLOSE: '3'
+
+          # --- Moneda (medida 2026-07-29, no copiada de otra tienda) ---
+          # Shopify GLENDA(R): currency=MXN, money_format="$ {{amount}}"
+          # Cuenta Meta "SKIN+ MX": currency=EUR
+          # El lector esta en Madrid, asi que el reporte se muestra en EUR.
+          STORE_CURRENCY_ISO: 'MXN'
+          META_CURRENCY_ISO: 'EUR'
+          REPORT_CURRENCY_ISO: 'EUR'
+          # El simbolo sale del ISO + STORE_LOCALE (EUR + es-ES => "€").
+          # Descomentar solo para forzar otro simbolo.
+          # REPORT_CURRENCY: '€'
+
+          # Locale del LECTOR (Madrid), no el de la tienda: los importes salen en
+          # euros y se leen en Espana -> 1.234,56 en vez de 1,234.56.
+          STORE_LOCALE: 'es-ES'
+
+          # Debe coincidir con la hora configurada en cron-job.org.
+          REPORT_TIME_LABEL: '11:05 (Europe/Madrid)'
+
           # STORE_INDUSTRY: ''
           # ROAS_BENCHMARK: ''
           # SUBSCRIPTION_TAGS: '[]'
+          # FX_FALLBACK_STORE_PER_REPORT: ''  # MXN por 1 EUR, solo si falla la API de FX
           REPORT_DATE: ${{ inputs.report_date }}
         run: node src/report.js

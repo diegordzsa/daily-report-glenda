@@ -1,19 +1,65 @@
 import { fetchShopifyOrders, getYesterday } from './shopify.js';
-import { fetchMetaAds } from './meta.js';
+import { fetchMetaAds, fetchAdAccountTimezone } from './meta.js';
+import { hoursSinceDayClose } from './freshness.js';
 import { generateDiagnosis } from './claude.js';
 import { sendToSlack, formatReport } from './slack.js';
-import { fetchRate, resolveISO } from './exchange.js';
+import { fetchRate } from './exchange.js';
 import {
   STORE_NAME, META_ACCESS_TOKEN, SHOPIFY_ACCESS_TOKEN,
-  SLACK_WEBHOOK_URL, SUBSCRIPTION_TAGS, STORE_CURRENCY, REPORT_CURRENCY,
+  SLACK_WEBHOOK_URL, SUBSCRIPTION_TAGS,
+  STORE_CURRENCY_ISO, META_CURRENCY_ISO, REPORT_CURRENCY_ISO,
+  META_ACCOUNT_TIMEZONE, MIN_HOURS_AFTER_CLOSE,
 } from './config.js';
 
+// Meta sigue agregando gasto durante horas despues de que cierra el dia en la
+// timezone de la cuenta. Publicar antes de tiempo subestima el spend, lo que
+// infla ROAS y MER. Preferimos no publicar a publicar cifras incorrectas.
+async function assertMetaDataIsSettled(reportDate, timeZone) {
+  const hours = hoursSinceDayClose(reportDate, timeZone);
+
+  console.log(
+    `[Freshness] ${reportDate} cerro hace ${hours.toFixed(2)} h en ${timeZone} ` +
+    `(minimo requerido: ${MIN_HOURS_AFTER_CLOSE} h)`
+  );
+
+  if (hours >= MIN_HOURS_AFTER_CLOSE) return hours;
+
+  const reason = hours < 0
+    ? `el dia todavia no termina en ${timeZone} (faltan ${(-hours).toFixed(1)} h)`
+    : `solo han pasado ${hours.toFixed(1)} h desde el cierre, el minimo es ${MIN_HOURS_AFTER_CLOSE} h`;
+
+  console.error(`Datos de Meta sin consolidar: ${reason}`);
+  await sendToSlack(SLACK_WEBHOOK_URL,
+    `:hourglass_flowing_sand: *${STORE_NAME} — Reporte Diario NO publicado*\n${reportDate}\n\n` +
+    `Meta aun no consolida el gasto: ${reason}.\n` +
+    `No se publica el reporte para no dar cifras incorrectas ` +
+    `(un gasto subestimado infla ROAS y MER).`
+  );
+  process.exit(1);
+}
+
+// Aborta antes que publicar cifras sin convertir. Si el gasto de Meta no viene
+// en la moneda que creemos, o si no hay tipo de cambio, los numeros del reporte
+// serian falsos sin que nada fallara.
+async function abortWithCurrencyError(reportDate, detail) {
+  console.error(`Moneda inconsistente: ${detail}`);
+  await sendToSlack(SLACK_WEBHOOK_URL,
+    `:heavy_dollar_sign: *${STORE_NAME} — Reporte Diario NO publicado*\n${reportDate}\n\n` +
+    `Problema de moneda: ${detail}.\n` +
+    `No se publica el reporte para no dar cifras sin convertir.`
+  );
+  process.exit(1);
+}
+
 async function run() {
-  const yesterday = getYesterday();
+  // La timezone de la cuenta gobierna tanto la fecha a reportar como el guard.
+  const timeZone = await fetchAdAccountTimezone(META_ACCESS_TOKEN) || META_ACCOUNT_TIMEZONE;
+  const yesterday = getYesterday(timeZone);
+  const hoursSettled = await assertMetaDataIsSettled(yesterday, timeZone);
 
   const [metaResult, shopifyResult] = await Promise.allSettled([
     fetchMetaAds(META_ACCESS_TOKEN, yesterday),
-    fetchShopifyOrders(SHOPIFY_ACCESS_TOKEN),
+    fetchShopifyOrders(SHOPIFY_ACCESS_TOKEN, yesterday),
   ]);
 
   const metaData = metaResult.status === 'fulfilled' ? metaResult.value : [];
@@ -40,32 +86,44 @@ async function run() {
     process.exit(1);
   }
 
-  const metrics = calculateMetrics(metaData, shopifyData);
-
-  if (STORE_CURRENCY !== REPORT_CURRENCY) {
-    const fromISO = resolveISO(STORE_CURRENCY);
-    const toISO = resolveISO(REPORT_CURRENCY);
-    if (fromISO && toISO) {
-      const rate = await fetchRate(fromISO, toISO);
-      if (rate > 0) {
-        metrics.shopifyRevenue *= rate;
-        metrics.shopifyAOV *= rate;
-      }
-    }
+  // La moneda de la cuenta viene en la respuesta de insights: comprobamos lo que
+  // Meta dice, no lo que asumimos. El gasto se usa tal cual, asi que si la cuenta
+  // dejara de facturar en REPORT_CURRENCY_ISO todo el ROAS quedaria mal.
+  const reportedCurrency = metaData.find(r => r.account_currency)?.account_currency;
+  if (reportedCurrency && reportedCurrency !== META_CURRENCY_ISO) {
+    await abortWithCurrencyError(yesterday,
+      `Meta reporta el gasto en ${reportedCurrency} pero META_CURRENCY_ISO dice ${META_CURRENCY_ISO}`);
+  }
+  if (META_CURRENCY_ISO !== REPORT_CURRENCY_ISO) {
+    await abortWithCurrencyError(yesterday,
+      `el gasto de Meta esta en ${META_CURRENCY_ISO} y el reporte en ${REPORT_CURRENCY_ISO}, ` +
+      `pero el gasto se usa sin convertir`);
   }
 
-  const spendISO = resolveISO(REPORT_CURRENCY);
-  if (spendISO && spendISO !== 'USD') {
-    const usdRate = await fetchRate(spendISO, 'USD');
-    if (usdRate > 0) {
-      metrics.adSpendUSD = metrics.adSpend * usdRate;
+  const metrics = calculateMetrics(metaData, shopifyData);
+
+  // Shopify factura en STORE_CURRENCY_ISO; el reporte se lee en REPORT_CURRENCY_ISO.
+  if (STORE_CURRENCY_ISO !== REPORT_CURRENCY_ISO) {
+    const rate = await fetchRate(STORE_CURRENCY_ISO, REPORT_CURRENCY_ISO, true);
+    if (!(rate > 0)) {
+      await abortWithCurrencyError(yesterday,
+        `no se pudo obtener el tipo de cambio ${STORE_CURRENCY_ISO} -> ${REPORT_CURRENCY_ISO} ` +
+        `y no hay FX_FALLBACK_STORE_PER_REPORT configurado`);
     }
+    metrics.shopifyRevenue *= rate;
+    metrics.shopifyAOV *= rate;
+  }
+
+  // Parentesis informativo en USD. Si falla, se omite: no altera ninguna cifra.
+  if (REPORT_CURRENCY_ISO !== 'USD') {
+    const usdRate = await fetchRate(REPORT_CURRENCY_ISO, 'USD');
+    if (usdRate > 0) metrics.adSpendUSD = metrics.adSpend * usdRate;
   }
 
   metrics.merROAS = metrics.adSpend > 0 ? metrics.shopifyRevenue / metrics.adSpend : 0;
 
   const subDebug = metrics.subscriptionCounts.map(s => `${s.label}: ${s.count}`).join(', ');
-  console.log(`[Debug] Orders: ${metrics.shopifyOrders}, Net Sales (EUR): ${metrics.shopifyRevenue.toFixed(2)}, MER-ROAS: ${metrics.merROAS.toFixed(2)}x${subDebug ? `, ${subDebug}` : ''}`);
+  console.log(`[Debug] Orders: ${metrics.shopifyOrders}, Net Sales (${REPORT_CURRENCY_ISO}): ${metrics.shopifyRevenue.toFixed(2)}, MER-ROAS: ${metrics.merROAS.toFixed(2)}x${subDebug ? `, ${subDebug}` : ''}`);
 
   let diagnosis;
   try {
@@ -79,6 +137,7 @@ async function run() {
     date: yesterday,
     metrics,
     diagnosis,
+    hoursSettled,
   });
 
   try {

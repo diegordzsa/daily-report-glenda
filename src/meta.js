@@ -27,8 +27,33 @@ function extractActions(actionsArray, map) {
   return result;
 }
 
+// La timezone de la cuenta define cuando cierra el dia para Meta, y por tanto la
+// hora mas temprana a la que puede existir un reporte fiable. Se lee en cada
+// ejecucion en vez de confiar en una constante: si alguien la cambia en el
+// Business Manager, el guard de frescura debe enterarse solo.
+export async function fetchAdAccountTimezone(accessToken) {
+  const params = new URLSearchParams({
+    access_token: accessToken,
+    fields: 'timezone_name',
+  });
+  const url = `https://graph.facebook.com/${META_API_VERSION}/act_${META_AD_ACCOUNT_ID}?${params}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn(`[Meta] No se pudo leer la timezone de la cuenta: ${res.status}`);
+      return null;
+    }
+    const json = await res.json();
+    return json.timezone_name || null;
+  } catch (err) {
+    console.warn(`[Meta] No se pudo leer la timezone de la cuenta: ${err.message}`);
+    return null;
+  }
+}
+
 export async function fetchMetaAds(accessToken, reportDate) {
-  const fields = 'spend,impressions,clicks,actions,action_values,cpc,cpm,ctr,frequency';
+  const fields = 'spend,impressions,clicks,actions,action_values,cpc,cpm,ctr,frequency,account_currency';
   const params = new URLSearchParams({
     access_token: accessToken,
     time_range: JSON.stringify({ since: reportDate, until: reportDate }),
@@ -62,6 +87,7 @@ export async function fetchMetaAds(accessToken, reportDate) {
 
   return data.map(row => ({
     date: row.date_start,
+    account_currency: row.account_currency || '',
     spend: parseFloat(row.spend) || 0,
     impressions: parseInt(row.impressions) || 0,
     clicks: parseInt(row.clicks) || 0,

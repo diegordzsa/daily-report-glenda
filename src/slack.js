@@ -25,7 +25,7 @@ export async function sendToSlack(webhookUrl, reportText) {
   }
 }
 
-export function formatReport({ date, metrics, diagnosis }) {
+export function formatReport({ date, metrics, diagnosis, hoursSettled }) {
   const d = new Date(date);
   const dateStr = d.toLocaleDateString(STORE_LOCALE, {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -66,7 +66,8 @@ export function formatReport({ date, metrics, diagnosis }) {
     ...diagnosis.split('\n').map(line => `  ${line}`),
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `_Generado automaticamente a las ${REPORT_TIME_LABEL}_`,
+    `_Enviado a las ${REPORT_TIME_LABEL}` +
+      `${Number.isFinite(hoursSettled) ? ` · Meta: ${hoursSettled.toFixed(1)} h desde el cierre del dia` : ''}_`,
   );
 
   return lines.join('\n');

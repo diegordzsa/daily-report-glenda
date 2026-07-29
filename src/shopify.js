@@ -1,24 +1,30 @@
 import { SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION } from './config.js';
+import { yesterdayInZone } from './freshness.js';
 
-export function getYesterday() {
+// `timeZone` es la de la cuenta de Meta (que aqui coincide con la de la tienda,
+// medido: ambas America/Mexico_City). Calcularla en UTC hacia que una ejecucion
+// a las 03:00 UTC pidiera un dia que en la tienda aun no habia empezado.
+export function getYesterday(timeZone) {
   if (process.env.REPORT_DATE) return process.env.REPORT_DATE;
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return yesterdayInZone(timeZone);
 }
 
-export async function fetchShopifyOrders(accessToken) {
+function shiftDate(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
 
-  const yesterday = getYesterday();
-  const twoDaysAgo = new Date(yesterday);
-  twoDaysAgo.setDate(twoDaysAgo.getDate() - 1);
-  const minDate = twoDaysAgo.toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+export async function fetchShopifyOrders(accessToken, reportDate) {
+  const yesterday = reportDate;
 
+  // Ventana holgada a proposito. Shopify interpreta una fecha sin offset en la
+  // hora de la tienda, y `created_at` vuelve con el offset local; el filtro real
+  // es el prefijo de abajo, que ya trabaja en hora de tienda. El margen de un
+  // dia por lado evita depender de como resuelva Shopify los limites.
   const params = new URLSearchParams({
     status: 'any',
-    created_at_min: `${minDate}T00:00:00`,
-    created_at_max: `${today}T23:59:59`,
+    created_at_min: `${shiftDate(yesterday, -1)}T00:00:00`,
+    created_at_max: `${shiftDate(yesterday, 2)}T00:00:00`,
     limit: '250',
     fields: 'id,created_at,subtotal_price,total_discounts,tags,line_items',
   });
