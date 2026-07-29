@@ -1,0 +1,164 @@
+name: TEMP Diagnose
+
+# WORKFLOW TEMPORAL DE DIAGNOSTICO. Solo lee y loguea. NUNCA escribe a Slack.
+# Borrar cuando termine la Fase 1.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Diagnose
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+          SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN }}
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          STORE_NAME: ${{ secrets.STORE_NAME }}
+        run: |
+          cat > /tmp/diagnose.mjs <<'EOF'
+          const META_TOKEN = process.env.META_ACCESS_TOKEN;
+          const ACT = process.env.META_AD_ACCOUNT_ID;
+          const SHOP = process.env.SHOPIFY_STORE_DOMAIN;
+          const SHOP_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+          const V = 'v21.0';
+
+          console.log('=== RUN STARTED (UTC): ' + new Date().toISOString() + ' ===');
+          console.log('STORE_NAME: ' + process.env.STORE_NAME);
+          console.log('SHOPIFY_STORE_DOMAIN: ' + SHOP);
+          console.log('META_AD_ACCOUNT_ID: ' + ACT);
+
+          // ---------- 1.1 Meta account: timezone + currency ----------
+          console.log('\n=== 1.1 META ACCOUNT ===');
+          try {
+            const u = `https://graph.facebook.com/${V}/act_${ACT}?fields=name,timezone_name,timezone_offset_hours_utc,currency,account_status,business_name&access_token=${META_TOKEN}`;
+            const r = await fetch(u);
+            const j = await r.json();
+            console.log('HTTP ' + r.status);
+            console.log(JSON.stringify(j, null, 2));
+          } catch (e) { console.log('META ACCOUNT ERROR: ' + e.message); }
+
+          // ---------- 1.2 Shopify shop ----------
+          console.log('\n=== 1.2 SHOPIFY SHOP ===');
+          try {
+            const r = await fetch(`https://${SHOP}/admin/api/2024-10/shop.json`, {
+              headers: { 'X-Shopify-Access-Token': SHOP_TOKEN },
+            });
+            console.log('HTTP ' + r.status);
+            const j = await r.json();
+            const s = j.shop || {};
+            console.log(JSON.stringify({
+              name: s.name,
+              iana_timezone: s.iana_timezone,
+              timezone: s.timezone,
+              currency: s.currency,
+              money_format: s.money_format,
+              money_with_currency_format: s.money_with_currency_format,
+              enabled_presentment_currencies: s.enabled_presentment_currencies,
+              country_code: s.country_code,
+              plan_name: s.plan_name,
+            }, null, 2));
+          } catch (e) { console.log('SHOPIFY SHOP ERROR: ' + e.message); }
+
+          // ---------- 1.2b Shopify order sample: which currency do orders carry ----------
+          console.log('\n=== 1.2b SHOPIFY ORDER CURRENCY SAMPLE ===');
+          try {
+            const r = await fetch(`https://${SHOP}/admin/api/2024-10/orders.json?status=any&limit=3&fields=id,created_at,currency,current_total_price,subtotal_price,total_price,presentment_currency,total_price_set,subtotal_price_set`, {
+              headers: { 'X-Shopify-Access-Token': SHOP_TOKEN },
+            });
+            console.log('HTTP ' + r.status);
+            const j = await r.json();
+            for (const o of (j.orders || [])) {
+              console.log(JSON.stringify({
+                created_at: o.created_at,
+                currency: o.currency,
+                presentment_currency: o.presentment_currency,
+                subtotal_price: o.subtotal_price,
+                total_price: o.total_price,
+                subtotal_price_set: o.subtotal_price_set,
+              }));
+            }
+          } catch (e) { console.log('SHOPIFY ORDERS ERROR: ' + e.message); }
+
+          // ---------- 1.4 Meta consolidated spend, last 8 days ----------
+          console.log('\n=== 1.4 META CONSOLIDATED SPEND (last 8 days) ===');
+          try {
+            const today = new Date();
+            const until = new Date(today.getTime() - 86400000).toISOString().slice(0, 10);
+            const since = new Date(today.getTime() - 8 * 86400000).toISOString().slice(0, 10);
+            const p = new URLSearchParams({
+              access_token: META_TOKEN,
+              time_range: JSON.stringify({ since, until }),
+              time_increment: '1',
+              level: 'account',
+              fields: 'spend,impressions,clicks,account_currency',
+            });
+            const r = await fetch(`https://graph.facebook.com/${V}/act_${ACT}/insights?${p}`);
+            console.log('HTTP ' + r.status + '  range ' + since + ' .. ' + until);
+            const j = await r.json();
+            if (j.error) console.log(JSON.stringify(j.error, null, 2));
+            for (const row of (j.data || [])) {
+              console.log(`CONSOLIDATED ${row.date_start} spend=${row.spend} currency=${row.account_currency} impressions=${row.impressions} clicks=${row.clicks}`);
+            }
+          } catch (e) { console.log('META INSIGHTS ERROR: ' + e.message); }
+
+          // ---------- Shopify orders per day, in shop timezone vs UTC ----------
+          console.log('\n=== SHOPIFY ORDERS PER DAY (UTC bucket vs SHOP-TZ bucket) ===');
+          try {
+            const shopRes = await fetch(`https://${SHOP}/admin/api/2024-10/shop.json`, {
+              headers: { 'X-Shopify-Access-Token': SHOP_TOKEN },
+            });
+            const shopTz = (await shopRes.json()).shop?.iana_timezone || 'UTC';
+            const since = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10);
+            const p = new URLSearchParams({
+              status: 'any',
+              created_at_min: `${since}T00:00:00Z`,
+              limit: '250',
+              fields: 'id,created_at,subtotal_price,currency',
+            });
+            let url = `https://${SHOP}/admin/api/2024-10/orders.json?${p}`;
+            const all = [];
+            while (url) {
+              const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': SHOP_TOKEN } });
+              const j = await r.json();
+              all.push(...(j.orders || []));
+              const link = r.headers.get('link');
+              const next = link && link.match(/<([^>]+)>;\s*rel="next"/);
+              url = next ? next[1] : null;
+            }
+            console.log('shop iana_timezone = ' + shopTz + ' | total orders fetched = ' + all.length);
+            const fmtTz = new Intl.DateTimeFormat('en-CA', { timeZone: shopTz, year: 'numeric', month: '2-digit', day: '2-digit' });
+            const utcB = {}, tzB = {};
+            for (const o of all) {
+              const d = new Date(o.created_at);
+              const ku = d.toISOString().slice(0, 10);
+              const kt = fmtTz.format(d);
+              utcB[ku] = utcB[ku] || { n: 0, rev: 0 };
+              utcB[ku].n++; utcB[ku].rev += parseFloat(o.subtotal_price) || 0;
+              tzB[kt] = tzB[kt] || { n: 0, rev: 0 };
+              tzB[kt].n++; tzB[kt].rev += parseFloat(o.subtotal_price) || 0;
+            }
+            const keys = [...new Set([...Object.keys(utcB), ...Object.keys(tzB)])].sort();
+            for (const k of keys) {
+              const u = utcB[k] || { n: 0, rev: 0 };
+              const t = tzB[k] || { n: 0, rev: 0 };
+              console.log(`ORDERS ${k}  UTC-bucket: ${u.n} ord / ${u.rev.toFixed(2)}   ${shopTz}-bucket: ${t.n} ord / ${t.rev.toFixed(2)}`);
+            }
+            // hour-of-day distribution in shop tz, to see how late orders come in
+            const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: shopTz, hour: '2-digit', hour12: false });
+            const hours = {};
+            for (const o of all) hours[hourFmt.format(new Date(o.created_at))] = (hours[hourFmt.format(new Date(o.created_at))] || 0) + 1;
+            console.log('Orders by hour in ' + shopTz + ': ' + JSON.stringify(hours));
+          } catch (e) { console.log('SHOPIFY PER-DAY ERROR: ' + e.message); }
+
+          console.log('\n=== RUN ENDED (UTC): ' + new Date().toISOString() + ' ===');
+          EOF
+          node /tmp/diagnose.mjs
